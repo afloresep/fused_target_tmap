@@ -75,7 +75,7 @@ def main():
 
     # Load data
     df = pd.read_csv(csv_file)
-    df_shortened = df.head(10000)
+    df_shortened = df.head(1000)
 
     # Initialize encoder
     perm = 512  # Number of permutations used by the MinHashing algorithm
@@ -115,17 +115,16 @@ def main():
         {
             "x": x,
             "y": y,
-            "c": df['target_protein_class'].tolist(),
+            "c": df['standard_value'].tolist(),
             "labels": df['canonical_smiles'],
         },
         point_scale=3,
         colormap=['rainbow'],
         has_legend=True,
-        legend_title=['target_protein_class'],
+        legend_title=['Standard_value'],
         categorical=[False],
         shader='smoothCircle'
     )
-
     f.add_tree("mapc_tmap_node140_TMAP_tree", {"from": s, "to": t}, point_helper="mapc_tmap_node140_TMAP")
     f.plot('mapc_tmap_node140_TMAP', template='smiles')
 
