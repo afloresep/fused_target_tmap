@@ -2,130 +2,184 @@ import warnings
 from tqdm import tqdm
 import tmap as tm
 import pandas as pd
-import warnings
-from timeit import default_timer as timer
 import numpy as np
-import pandas as pd
-import tmap as tm 
+from timeit import default_timer as timer
 from faerun import Faerun
 from mhfp.encoder import MHFPEncoder
 from rdkit import Chem
-from tqdm import tqdm
-from mapchiral.mapchiral import encode
+from mapchiral.mapchiral import encode as mapc_enc
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def encode_smiles(smiles, encoder):
+    """
+    Helper function to encode a single SMILES string based on the specified encoder.
+
+    Args:
+    smiles (str): The SMILES string to encode.
+    encoder (str): The encoding method, 'mhfp' or 'mapc'.
+    kwargs: Additional arguments for the encoder.
+
+    Returns:
+    tm.VectorUint: Encoded fingerprint.
+    """
+    if encoder == 'mapc':
+        return tm.VectorUint(mapc_enc(Chem.MolFromSmiles(smiles), max_radius=2, n_permutations=2048, mapping=False))
+    elif encoder == 'mhfp':
+        perm = 512
+        mhfp_enc = MHFPEncoder(perm)
+        return tm.VectorUint(mhfp_enc.encode(smiles))
+    return None
 
 def calculate_fingerprints(df, encoder):
     """
     Calculate fingerprints for SMILES strings in the dataframe.
     
     Args:
-    df (pandas.DataFrame): DataFrame containing 'canonical_smiles' column
-    encoder: The encoder object used to encode SMILES strings (e.g. 'mhfp' or 'mapc)
+    df (pandas.DataFrame): DataFrame containing 'canonical_smiles' column.
+    encoder (str): The encoder object used to encode SMILES strings ('mhfp' or 'mapc').
     
     Returns:
-    tuple: (list of encoded fingerprints, list of valid indices)
+    tuple: (list of encoded fingerprints, list of valid indices).
     """
     fingerprints = []
     valid_indices = []
-    
-    if encoder =='mapc':
-        for idx, smiles in enumerate(tqdm(df['canonical_smiles'], desc="Calculating fingerprints from SMILES")):
-            try:
-                with warnings.catch_warnings(record=True) as w:
-                    warnings.simplefilter("always")
-                    enc_fingerprint = tm.VectorUint(encode(Chem.MolFromSmiles(smiles), max_radius=2, n_permutations=2048, mapping=False))
-                    if w and issubclass(w[-1].category, UserWarning):
-                        print(f"Warning for Fingerprints {smiles}: {str(w[-1].message)}")
-                        continue
-                fingerprints.append(enc_fingerprint)
-                valid_indices.append(idx)
-            except Exception as e:
-                print(f"Error encoding Fingerprints {smiles}: {str(e)}")
-        
-        return fingerprints, valid_indices
-    
-    
-    if encoder =='mhfp':
-        # Initialize encoder
-        perm = 512  # Number of permutations used by the MinHashing algorithm
-        mhfp_enc = MHFPEncoder(perm)
 
-        for idx, smiles in enumerate(tqdm(df['canonical_smiles'], desc="Calculating fingerprints from SMILES")):
-            try:
-                with warnings.catch_warnings(record=True) as w:
-                    warnings.simplefilter("always")
-                    enc_fingerprint = tm.VectorUint(mhfp_enc.encode(smiles))
-                    if w and issubclass(w[-1].category, UserWarning):
-                        print(f"Warning for Fingerprints {smiles}: {str(w[-1].message)}")
-                        continue
-                fingerprints.append(enc_fingerprint)
-                valid_indices.append(idx)
-            except Exception as e:
-                print(f"Error encoding Fingerprints {smiles}: {str(e)}")
+    for idx, smiles in enumerate(tqdm(df['canonical_smiles'], desc=f"Calculating fingerprints ({encoder})")):
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                enc_fingerprint = encode_smiles(smiles, encoder)
+                if w and issubclass(w[-1].category, UserWarning):
+                    logger.warning(f"Warning for Fingerprints {smiles}: {str(w[-1].message)}")
+                    continue
+            fingerprints.append(enc_fingerprint)
+            valid_indices.append(idx)
+        except Exception as e:
+            logger.error(f"Error encoding Fingerprints {smiles}: {str(e)}")
         
-        return fingerprints, valid_indices
-    
+    return fingerprints, valid_indices
+
 def list_to_vectorUint(lst):
-    '''
-    This function changes lists or np.arrays to tm.VectorUint type of object
-    '''
+    """
+    Convert list or numpy array to tm.VectorUint type.
+    
+    Args:
+    lst (list or np.array): The list or array to convert.
+    
+    Returns:
+    tm.VectorUint: Converted VectorUint object.
+    """
     return tm.VectorUint(lst)
 
 def minhash_fingerprints(df, fingerprints, valid_indices):
-    '''
-    This function takes the fingerprints as tm.VectorUint type and transforms it to an array. Then merges all fingerprints with same target taking the minumum value at each index in the vector. 
-    '''
-    # Create a copy of the original DataFrame, filtered by valid_indices
-    df_processed = df.loc[valid_indices].copy()
+    """
+    Combine fingerprints by taking the minimum values for identical targets.
     
-    # Add the fingerprint vectors as a new column
+    Args:
+    df (pandas.DataFrame): The DataFrame with target IDs.
+    fingerprints (list): List of tm.VectorUint fingerprints.
+    valid_indices (list): Indices of valid entries in the original DataFrame.
+    
+    Returns:
+    pandas.Series: Combined fingerprints as tm.VectorUint.
+    """
+    df_processed = df.loc[valid_indices].copy()
     df_processed['fingerprint_vector'] = pd.Series(fingerprints, index=valid_indices)
-
-    # Convert fingerprint Vector Uint to numpy arrays to be able to perform the calculations
     df_processed['fingerprint_vector'] = df_processed['fingerprint_vector'].apply(np.array)
 
-    # Group by Target_ID and find minimum values for every fingerprint with same Target_ID
     result = df_processed.groupby('Target_ID').agg({
         'fingerprint_vector': lambda x: np.min(np.vstack(x), axis=0).tolist(),
-        **{col: 'first' for col in df_processed.columns if col != 'fingerprint_vector' and col != 'Target_ID'}
+        **{col: 'first' for col in df_processed.columns if col not in ['fingerprint_vector', 'Target_ID']}
     }).reset_index()
 
-    result.to_csv('df_with_combined_fp.csv', index=False)
-    # Convert np.array back to tm.VectorUint to be able to perform TMAP
     result['fingerprint_vector'] = result['fingerprint_vector'].apply(list_to_vectorUint)
-    
-    # Save the results
-    # result.to_csv('minhashed_fingerprints2.csv', index=False)
     return result['fingerprint_vector']
 
-def main():
-    # File paths
-    csv_file = r'C:\Users\biolab\Desktop\Alex\tmap_fused\alex_dataset.csv'
+def safe_create_categories(series):
+    """
+    Create categories from a pandas Series, handling NaN values.
+    
+    Args:
+    series (pandas.Series): The input data series.
+    
+    Returns:
+    tuple: (labels, data) for Faerun plotting.
+    """
+    series = series.fillna('Unknown').astype(str)
+    return Faerun.create_categories(series)
 
-    # Load data
+def plot_faerun(x, y, s, t, df):
+    """
+    Plot the data using Faerun.
+    
+    Args:
+    x (list): X coordinates.
+    y (list): Y coordinates.
+    s (list): Source nodes for tree plot.
+    t (list): Target nodes for tree plot.
+    df (pandas.DataFrame): DataFrame with target data.
+    """
+    f = Faerun(view="front", coords=False, clear_color="#FFFFFF")
+
+    # Create categories
+    target_id_labels, target_id_data = safe_create_categories(df['Target_ID'])
+    protein_class_labels, protein_class_data = safe_create_categories(df['target_protein_class'])
+    taxonomy_labels, taxonomy_data = safe_create_categories(df['Target_Taxonomy'])
+    organism_labels, organism_data = safe_create_categories(df['Target_organism'])
+    target_type_labels, target_type_data = safe_create_categories(df['Target_type'])
+
+    # Add scatter plot
+    f.add_scatter(
+        "Target_Data",
+        {
+            "x": x,
+            "y": y,
+            "c": [protein_class_data, taxonomy_data, organism_data, target_type_data],
+            "labels": df['Target_ID'].fillna('Unknown').astype(str)
+        },
+        shader="sphere",
+        point_scale=5,
+        max_point_size=20,
+        legend_labels=[protein_class_labels, taxonomy_labels, organism_labels, target_type_labels],
+        categorical=[True, True, True, True],
+        colormap=['tab20', 'tab20', 'tab20', 'tab20'],
+        series_title=['Target ID', 'Protein Class', 'Taxonomy', 'Organism', 'Target Type'],
+        has_legend=True,
+    )
+
+    # Add tree
+    f.add_tree("Target_Data_tree", {"from": s, "to": t}, point_helper="Target_Data")
+    
+    # Plot
+    f.plot('Target_Data', template='smiles')
+
+def main():
+    csv_file = r'C:\Users\biolab\Desktop\Alex\tmap_fused\alex_dataset.csv'
     df = pd.read_csv(csv_file)
 
-    # Initialize encoder
-    perm = 512  # Number of permutations used by the MinHashing algorithm
-
-    # Calculate or load fingerprints
+    # Calculate fingerprints
     fingerprints, valid_indices = calculate_fingerprints(df, 'mapc')
 
-    # Update DataFrame with valid entries only
+    # Filter DataFrame
     df = df.iloc[valid_indices].reset_index(drop=True)
 
-    # Combine fingerprints for all fingerprints with same target. 
-    print('Combining fingerprints')
+    # Combine fingerprints
+    logger.info('Combining fingerprints')
     fused_fingerprints = minhash_fingerprints(df, fingerprints, valid_indices)
-    print(f'Combination successful. Total of fused fingerprints is now: {len(fused_fingerprints)}')
+    logger.info(f'Combination successful. Total fused fingerprints: {len(fused_fingerprints)}')
 
-    # LSH Indexing and coordinates generation
-    print('Indexing...')
-    lf = tm.LSHForest(perm)
+    # TMAP layout and indexing
+    logger.info('Indexing...')
+    lf = tm.LSHForest(512)
     lf.batch_add(fused_fingerprints)
     lf.index()
-    
-    # Get the coordinates and Layout Configuration
+
+    cfg = tm.LayoutConfiguration()
     cfg = tm.LayoutConfiguration()
     cfg.node_size = 1 / 40
     cfg.mmm_repeats = 2
@@ -133,60 +187,13 @@ def main():
     cfg.k = 20
     cfg.sl_scaling_type = tm.RelativeToAvgLength
     x, y, s, t, _ = tm.layout_from_lsh_forest(lf, cfg)
-    
-    print("Plotting...")
 
-    # Function to safely create categories
-    def safe_create_categories(series):
-        # Convert all values to strings, replacing NaN with 'Unknown'
-        series = series.fillna('Unknown').astype(str)
-        return Faerun.create_categories(series)
-    
-    # Create categories for each of the specified columns
-    target_id_labels, target_id_data = safe_create_categories(df['Target_ID'])
-    protein_class_labels, protein_class_data = safe_create_categories(df['target_protein_class'])
-    taxonomy_labels, taxonomy_data = safe_create_categories(df['Target_Taxonomy'])
-    organism_labels, organism_data = safe_create_categories(df['Target_organism'])
-    target_type_labels, target_type_data = safe_create_categories(df['Target_type'])
-    
-    # Create Faerun object
-    f = Faerun(view="front", coords=False, clear_color="#FFFFFF")
-    
-    # Add scatter plot
-    f.add_scatter(
-        "Target_Data",
-        {
-            "x": x,
-            "y": y,
-            "c": [
-                  protein_class_data,
-                  taxonomy_data,
-                  organism_data,
-                  target_type_data],
-            "labels": df['Target_ID'].fillna('Unknown').astype(str),  # Using Target_ID as labels, converted to string
-        },
-        shader="sphere",
-        point_scale=5,
-        max_point_size=20,
-        legend_labels=[ 
-                       protein_class_labels, 
-                       taxonomy_labels, 
-                       organism_labels, 
-                       target_type_labels],
-        categorical=[True, True, True, True, True],
-        colormap=['tab20', 'tab20', 'tab20', 'tab20', 'tab20'],  
-        series_title=['Target ID', 'Protein Class', 'Taxonomy', 'Organism', 'Target Type'],
-        has_legend=True,
-    )
-    
-    # Add tree
-    f.add_tree("Target_Data_tree", {"from": s, "to": t}, point_helper="Target_Data")
-    
-    # Plot
-    f.plot('Target_Data', template='smiles')
+    logger.info('Plotting...')
+    plot_faerun(x, y, s, t, df)
+
 if __name__ == "__main__":
     start_time = timer()
     main()
     end_time = timer()
-    print('TMAP successfully generated.')
+    logger.info('TMAP successfully generated.')
     print(f"Total execution time: {(end_time - start_time)/60:.2f} minutes")
