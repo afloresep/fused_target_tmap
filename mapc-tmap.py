@@ -75,13 +75,12 @@ def main():
 
     # Load data
     df = pd.read_csv(csv_file)
-    df_shortened = df.head(1000)
 
     # Initialize encoder
     perm = 512  # Number of permutations used by the MinHashing algorithm
 
     # Calculate or load fingerprints
-    fingerprints, valid_indices = calculate_fingerprints(df_shortened, 'mapc')
+    fingerprints, valid_indices = calculate_fingerprints(df, 'mapc')
 
     # Update DataFrame with valid entries only
     df = df.iloc[valid_indices].reset_index(drop=True)
