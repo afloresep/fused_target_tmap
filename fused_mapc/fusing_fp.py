@@ -159,7 +159,7 @@ def plot_faerun(x, y, s, t, df):
     f.plot('Target_Data', template='smiles')
 
 def main():
-    csv_file = r'C:\Users\biolab\Desktop\Alex\tmap_fused\alex_dataset.csv'
+    csv_file = r'path_to_csv.csv'
     df = pd.read_csv(csv_file)
 
     # Calculate fingerprints

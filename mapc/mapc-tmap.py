@@ -71,7 +71,7 @@ def calculate_fingerprints(df, encoder):
 
 def main():
     # File paths
-    csv_file = r'C:\Users\biolab\Desktop\Alex\tmap_fused\alex_dataset.csv'
+    csv_file = r'path_to_csv.csv'
 
     # Load data
     df = pd.read_csv(csv_file)
