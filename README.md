@@ -69,7 +69,7 @@ Entire code [here](https://github.com/afloresep/fused_target_tmap/blob/master/ma
 	- Plotting using Faerun
 
 After a few trials and readjusting the node_size etc we have this: 
-<img src='/images/first_tmap.png'>
+[[afloresep/fused_target_tmap/images/fused_tmap.png]]
 
 ### 1.2. Data Mapping
 Several mapping functions are used to categorize the data:
@@ -199,5 +199,4 @@ The final step is to visualize the data using the Faerun library, which is speci
 - A tree structure shows the relationships between data points.
 
 Final result: 
-<img src='/images/final_tmap.png'>
-
+[[afloresep/fused_target_tmap/images/final_tmap.png]]

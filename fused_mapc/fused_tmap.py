@@ -13,7 +13,6 @@ import logging
 import pickle
 from pathlib import Path
 
-
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -112,101 +111,81 @@ def safe_create_categories(series):
     Returns:
     tuple: (labels, data) for Faerun plotting.
     """
-    series = series.fillna('Unknown').astype(str)
-    return Faerun.create_categories(series)
+    return Faerun.create_categories(series.fillna('Unknown').astype(str))
 
 def map_protein_class(value):
+    """Map protein class to a simplified category."""
     if pd.isna(value):
         return np.nan
     
     value = value.lower().strip()
     
     if 'enzyme' in value:
-        if 'kinase' in value:
-            return 'kinase'
-        elif 'protease' in value:
-            return 'protease'
-        elif 'cytochrome p450' in value:
-            return 'cytochrome p450'
-        else:
-            return 'enzyme'
-    elif 'ion channel' in value:
-        return 'ion channel'
-    elif 'transporter' in value:
-        return 'transporter'
-    elif 'transcription factor' in value:
-        return 'transcription factor'
-    elif 'membrane receptor' in value:
-        return 'membrane receptor'
-    elif 'epigenetic regulator' in value:
-        return 'epigenetic regulator'
+        return 'kinase' if 'kinase' in value else 'protease' if 'protease' in value else 'cytochrome p450' if 'cytochrome p450' in value else 'enzyme'
+    elif any(keyword in value for keyword in ['ion channel', 'transporter', 'transcription factor', 'membrane receptor', 'epigenetic regulator']):
+        return next(keyword for keyword in ['ion channel', 'transporter', 'transcription factor', 'membrane receptor', 'epigenetic regulator'] if keyword in value)
     else:
-        return 'other'  # Default category for unmatched classes
+        return 'other'
     
-def map_target_taxonomy(value): 
+def map_target_taxonomy(value):
+    """Map target taxonomy to a simplified category."""
     if pd.isna(value):
         return np.nan
     value = value.lower().strip()
     
-    if 'enzyme' in value:
-        return 'Enzyme'    
-    elif 'receptor' in value:
-        return 'Receptor'
-    elif 'transcription factor' in value:
-        return 'Transcription Factor'
-    elif 'nuclear hormone receptor' in value:
-        return 'Nuclear Hormone Receptor'
-    elif 'calcium channel' in value:
-        return 'Calcium Channel'
-    elif 'surface antigen' in value:
-        return 'Surface Antigen'
-    elif 'fungi' in value or 'viruses' in value or 'bacteria' in value:
-        return 'Microorganism'
-    elif 'eukaryotes' in value:
-        return 'Eukaryotes'
-    elif 'subcellular' in value:
-        return 'Subcellular Component'
-    elif 'small molecule' in value:
-        return 'Small Molecule'
-    elif 'lipid' in value:
-        return 'Lipid'
-    elif 'cellline' in value:
-        return 'Cell Line'
-    elif 'nucleic acid' in value:
-        return 'Nucleic Acid'
-    else:
-        return 'Other'  # Default category for unmatched classes 
+    categories = {
+        'Enzyme': ['enzyme'],
+        'Receptor': ['receptor'],
+        'Transcription Factor': ['transcription factor'],
+        'Nuclear Hormone Receptor': ['nuclear hormone receptor'],
+        'Calcium Channel': ['calcium channel'],
+        'Surface Antigen': ['surface antigen'],
+        'Microorganism': ['fungi', 'viruses', 'bacteria'],
+        'Eukaryotes': ['eukaryotes'],
+        'Subcellular Component': ['subcellular'],
+        'Small Molecule': ['small molecule'],
+        'Lipid': ['lipid'],
+        'Cell Line': ['cellline'],
+        'Nucleic Acid': ['nucleic acid']
+    }
+    
+    for category, keywords in categories.items():
+        if any(keyword in value for keyword in keywords):
+            return category
+    
+    return 'Other'
 
 def map_target_organism(value):
+    """Map target organism to a simplified category."""
     if 'sapiens' in value:
         return 'Homo sapiens'
     elif 'virus' in value:
         return 'Virus'
-    elif 'rattus' in value or 'Musculus' in value:
+    elif any(organism in value for organism in ['rattus', 'Musculus']):
         return 'Rat'
     elif 'taurus' in value:
         return 'Bovid'
-    elif 'scrofa' in value or 'Macaca' in value or 'porcellus' in value or 'oryctolagus' in value or 'canis' in value or 'Cricetulus' in value:
+    elif any(organism in value for organism in ['scrofa', 'Macaca', 'porcellus', 'oryctolagus', 'canis', 'Cricetulus']):
         return 'Other mammals'
-    elif 'Mycobacterium' in value or 'Escherichia' in value or 'Salmonella' in value or 'Staphylococcus' in value or 'Pseudomonas' in value or 'Bacillus' in value or 'Acinetobacter' in value:
+    elif any(bacteria in value for bacteria in ['Mycobacterium', 'Escherichia', 'Salmonella', 'Staphylococcus', 'Pseudomonas', 'Bacillus', 'Acinetobacter']):
         return 'Bacteria'
-    elif 'Plasmodium' in value or 'Trypanosoma' in value or 'Schistosoma' in value or 'Leishmania' in value:
+    elif any(parasite in value for parasite in ['Plasmodium', 'Trypanosoma', 'Schistosoma', 'Leishmania']):
         return 'Parasites'
     else:
         return 'Others'
 
 def select_value(group):
-    '''
-     Define a function to get the correct value based on the 'standard_value' category
-    '''
-    # Categories where the greater value should be selected
-    greater_value_terms = ['Activity', 'Inhibition', 'Potency', '% inhibition', 'Percent Effect']
-
-    if group['standard_value'].iloc[0] in greater_value_terms:
-        return group.loc[group['standard_value'].idxmax()]  # Return row with max 'standard_value'
+    """Select the correct value based on the 'standard_type' category."""
+    greater_value_terms = ['Activity', 'Inhibition', 'Potency', '% Inhibition', 'Percent Effect']
+    
+    # Check if the standard_type is in the greater_value_terms
+    if group['standard_type'].iloc[0] in greater_value_terms:
+        # If the standard_type is in the list, select the row with the maximum standard_value
+        return group.loc[group['standard_value'].idxmax()]
     else:
-        return group.loc[group['standard_value'].idxmin()]  # Return row with min 'standard_value'
-  
+        # Otherwise, select the row with the minimum standard_value
+        return group.loc[group['standard_value'].idxmin()]
+
 def plot_faerun(x, y, s, t, df):
 
     """
@@ -271,6 +250,7 @@ def main():
         with open(fingerprints_file, 'rb') as f:
             data = pickle.load(f)
         fused_fingerprints = data['fused_fingerprints']
+        logger.info(f'Total fused fingerprints: {len(fused_fingerprints)}')
         valid_indices = data['valid_indices']
         
     else:
@@ -295,12 +275,12 @@ def main():
 
     # Filter DataFrame
     df = df.iloc[valid_indices].reset_index(drop=True)
-    most_active_compound = df.groupby('Target_ID', group_keys=False).apply(select_value)
+    most_active_compounds = df.groupby('Target_ID').apply(select_value).reset_index(drop=True)
 
     # Apply the mapping function to the column to reduce number of unique values and make it color codeable 
-    most_active_compound['mapped_protein_class'] = most_active_compound['target_protein_class'].apply(map_protein_class)
-    most_active_compound['map_target_taxonomy'] = most_active_compound['Target_Taxonomy'].apply(map_target_taxonomy)
-    most_active_compound['map_target_organism'] = most_active_compound['Target_organism'].apply(map_target_organism)
+    most_active_compounds['mapped_protein_class'] = most_active_compounds['target_protein_class'].apply(map_protein_class)
+    most_active_compounds['map_target_taxonomy'] = most_active_compounds['Target_Taxonomy'].apply(map_target_taxonomy)
+    most_active_compounds['map_target_organism'] = most_active_compounds['Target_organism'].apply(map_target_organism)
 
     # TMAP layout and indexing
     logger.info('Indexing...')
@@ -322,7 +302,7 @@ def main():
     x, y, s, t, _ = tm.layout_from_lsh_forest(lf, cfg)
 
     logger.info('Plotting...')
-    plot_faerun(x, y, s, t, most_active_compound)
+    plot_faerun(x, y, s, t, most_active_compounds)
 
 if __name__ == "__main__":
     start_time = timer()
