@@ -194,7 +194,19 @@ def map_target_organism(value):
         return 'Parasites'
     else:
         return 'Others'
-    
+
+def select_value(group):
+    '''
+     Define a function to get the correct value based on the 'standard_value' category
+    '''
+    # Categories where the greater value should be selected
+    greater_value_terms = ['Activity', 'Inhibition', 'Potency', '% inhibition', 'Percent Effect']
+
+    if group['standard_value'].iloc[0] in greater_value_terms:
+        return group.loc[group['standard_value'].idxmax()]  # Return row with max 'standard_value'
+    else:
+        return group.loc[group['standard_value'].idxmin()]  # Return row with min 'standard_value'
+  
 def plot_faerun(x, y, s, t, df):
 
     """
@@ -212,38 +224,45 @@ def plot_faerun(x, y, s, t, df):
     # Create categories
     protein_class_labels, protein_class_data = safe_create_categories(df['mapped_protein_class'])
     taxonomy_labels, taxonomy_data = safe_create_categories(df['map_target_taxonomy'])
-    target_organism_labes, target_organism_data = safe_create_categories(df['map_target_organism'])
-    target_type_labels, target_type_data = safe_create_categories(df['Target_type'])
+    organism_labels, organism_data = safe_create_categories(df['map_target_organism'])
 
+    labels = []
+    for i, row in df.iterrows():
+        labels.append(
+                row['canonical_smiles']
+                + '__'
+                + f'<a target="_blank" href="https://www.ebi.ac.uk/chembl/target_report_card/{row["Target_ID"]}">Go To Target Card</a><br>'
+            )
+        
     # Add scatter plot
     f.add_scatter(
-        "cached_nice_labels",
+        "mapc_nice_labels",
         {
             "x": x,
             "y": y,
-            "c": [protein_class_data, taxonomy_data, target_type_data, target_organism_data],
-            "labels": df['Target_ID'].fillna('Unknown').astype(str)
+            "c": [protein_class_data, taxonomy_data, organism_data],
+            "labels": labels,
         },
         shader="sphere",
-        point_scale=5,
-        max_point_size=20,
-        legend_labels=[protein_class_labels, taxonomy_labels, target_type_labels, target_organism_labes],
+        point_scale=4,
+        max_point_size=10,
+        legend_labels=[protein_class_labels, taxonomy_labels, organism_labels],
         categorical=[True, True, True, True],
         colormap="tab10",
-        series_title=['Protein Class', 'Target Taxonomy', 'Target Type', 'Target Organism'],
+        series_title=['Protein Class', 'Target Taxonomy', 'Target Organism'],
         has_legend=True,
     )
 
     # Add tree
-    f.add_tree("cached_nice_labels_tree", {"from": s, "to": t}, point_helper="cached_nice_labels", color="#222222")
+    f.add_tree("mapc_nice_labels_tree", {"from": s, "to": t}, point_helper="mapc_nice_labels", color="#222222")
     
     # Plot
-    f.plot("cached_nice_labels", template='smiles')
+    f.plot('mapc_nice_labels', template='smiles')
 
 def main():
     csv_file = r'C:\Users\biolab\Desktop\Alex\tmap_fused\alex_dataset.csv'
     df = pd.read_csv(csv_file)
-    
+ 
     # Define the path for saving/loading fingerprints
     fingerprints_file = Path(r'C:\Users\biolab\Desktop\Alex\tmap_fused\fused_fingerprints.pkl')
     
@@ -276,10 +295,12 @@ def main():
 
     # Filter DataFrame
     df = df.iloc[valid_indices].reset_index(drop=True)
+    most_active_compound = df.groupby('Target_ID', group_keys=False).apply(select_value)
+
     # Apply the mapping function to the column to reduce number of unique values and make it color codeable 
-    df['mapped_protein_class'] = df['target_protein_class'].apply(map_protein_class)
-    df['map_target_taxonomy'] = df['Target_Taxonomy'].apply(map_target_taxonomy)
-    df['map_target_organism'] = df['Target_organism'].apply(map_target_organism)
+    most_active_compound['mapped_protein_class'] = most_active_compound['target_protein_class'].apply(map_protein_class)
+    most_active_compound['map_target_taxonomy'] = most_active_compound['Target_Taxonomy'].apply(map_target_taxonomy)
+    most_active_compound['map_target_organism'] = most_active_compound['Target_organism'].apply(map_target_organism)
 
     # TMAP layout and indexing
     logger.info('Indexing...')
@@ -301,7 +322,7 @@ def main():
     x, y, s, t, _ = tm.layout_from_lsh_forest(lf, cfg)
 
     logger.info('Plotting...')
-    plot_faerun(x, y, s, t, df)
+    plot_faerun(x, y, s, t, most_active_compound)
 
 if __name__ == "__main__":
     start_time = timer()
