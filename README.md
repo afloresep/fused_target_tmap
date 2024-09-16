@@ -69,7 +69,7 @@ Entire code [here](https://github.com/afloresep/fused_target_tmap/blob/master/ma
 	- Plotting using Faerun
 
 After a few trials and readjusting the node_size etc we have this: 
-[[afloresep/fused_target_tmap/images/fused_tmap.png]]
+![](images/fused_tmap.png)
 
 ### 1.2. Data Mapping
 Several mapping functions are used to categorize the data:
@@ -198,5 +198,4 @@ The final step is to visualize the data using the Faerun library, which is speci
 - Hovering over a point shows the SMILES string and a link to the target's ChEMBL page.
 - A tree structure shows the relationships between data points.
 
-Final result: 
-[[afloresep/fused_target_tmap/images/final_tmap.png]]
+Final result: ![Final Result](images/final_tmap.png)
