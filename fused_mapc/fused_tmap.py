@@ -14,6 +14,7 @@ import pickle
 from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
+import html
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -246,11 +247,17 @@ def plot_faerun(x, y, s, t, df):
     frac_csp3_data = []
 
     for i, row in df.iterrows():
+        target_name = str(row["target_name"]).strip()  # Convert to string and remove leading/trailing whitespace
+        target_name = html.escape(target_name)  # Escape special characters
+        
+        if not target_name:
+            target_name = "N/A"  # Provide a default value if empty
+        
         labels.append(
-                row['canonical_smiles']
-                + '__'
-                + f'<a target="_blank" href="https://www.ebi.ac.uk/chembl/target_report_card/{row["Target_ID"]}">{row["Target_ID"]}</a><br>'
-            )
+            row['canonical_smiles']
+            + '__'
+            + f'<a target="_blank" href="https://www.ebi.ac.uk/chembl/target_report_card/{row["Target_ID"]}">{target_name}</a><br>'
+        )
         
         # Calculate molecular properties
         properties = calculate_molecular_properties(row['canonical_smiles'])
@@ -276,7 +283,7 @@ def plot_faerun(x, y, s, t, df):
     clogp_threshold = calculate_threshold(clogp_data)
     csp3_threshold = calculate_threshold(frac_csp3_data)
 
-    # Function to apply thresholds and return filtered data
+    # Function to apply thresholds and return filtered data as separate lists
     def apply_thresholds(hac_data, frac_aromatic_data, num_rings_data, clogp_data, frac_csp3_data):
         filtered_hac = []
         filtered_frac_aromatic = []
@@ -299,7 +306,7 @@ def plot_faerun(x, y, s, t, df):
 
     # Add scatter plot
     f.add_scatter(
-        "mapc_nice_labels",
+        "mapc_targets",
         {
             "x": x,
             "y": y,
@@ -320,14 +327,13 @@ def plot_faerun(x, y, s, t, df):
     )
 
     # Add tree
-    f.add_tree("mapc_nice_labels_tree", {"from": s, "to": t}, point_helper="mapc_nice_labels", color="#222222")
+    f.add_tree("mapc_targets_tree", {"from": s, "to": t}, point_helper="mapc_targets", color="#222222")
     
     # Plot
-    f.plot('mapc_nice_labels', template='smiles')
+    f.plot('mapc_targets', template='smiles')
 
 def main():
     csv_file = r'C:\Users\biolab\Desktop\Alex\tmap_fused\alex_dataset.csv'
-    
     df = pd.read_csv(csv_file)
  
     # Define the path for saving/loading fingerprints
@@ -398,4 +404,3 @@ if __name__ == "__main__":
     end_time = timer()
     logger.info('TMAP successfully generated.')
     print(f"Total execution time: {(end_time - start_time)/60:.2f} minutes")
-    
