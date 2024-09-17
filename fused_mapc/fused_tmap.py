@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import pickle
 from pathlib import Path
+from rdkit import Chem
+from rdkit.Chem import Descriptors, rdMolDescriptors
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +38,36 @@ def encode_smiles(smiles, encoder):
         mhfp_enc = MHFPEncoder(perm)
         return tm.VectorUint(mhfp_enc.encode(smiles))
     return None
+
+def calculate_threshold(data):
+    # Function to calculate threshold using IQR method
+    q1, q3 = np.percentile(data, [25, 75])
+    iqr = q3 - q1
+    threshold = q3 + 1.5 * iqr
+    return threshold
+
+def calculate_molecular_properties(smiles):
+    """
+    Calculate molecular properties using RDKit.
+    
+    Args:
+    smiles (str): SMILES string of the molecule.
+    
+    Returns:
+    tuple: (HAC, fraction_aromatic_atoms, number_of_rings, clogP, fraction_Csp3)
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    
+    hac = mol.GetNumHeavyAtoms()
+    num_aromatic_atoms = sum(1 for atom in mol.GetAtoms() if atom.GetIsAromatic())
+    fraction_aromatic_atoms = num_aromatic_atoms / hac if hac > 0 else 0
+    number_of_rings = rdMolDescriptors.CalcNumRings(mol)
+    clogP = Descriptors.MolLogP(mol)
+    fraction_Csp3 = Descriptors.FractionCSP3(mol)
+    
+    return (hac, fraction_aromatic_atoms, number_of_rings, clogP, fraction_Csp3)
 
 def calculate_fingerprints(df, encoder):
     """
@@ -121,39 +153,40 @@ def map_protein_class(value):
     value = value.lower().strip()
     
     if 'enzyme' in value:
-        return 'kinase' if 'kinase' in value else 'protease' if 'protease' in value else 'cytochrome p450' if 'cytochrome p450' in value else 'enzyme'
-    elif any(keyword in value for keyword in ['ion channel', 'transporter', 'transcription factor', 'membrane receptor', 'epigenetic regulator']):
-        return next(keyword for keyword in ['ion channel', 'transporter', 'transcription factor', 'membrane receptor', 'epigenetic regulator'] if keyword in value)
+            return 'Enzyme'
+    elif 'membrane receptor' in value: 
+        return 'Membrane receptor'
+    elif ' ion channel' in value:
+        return 'Ion Channel'
+    elif 'transcription factor' in value: 
+        return 'Transcription factor'
+    elif 'epigenetic regulator' in value:
+        return 'Epigenetic regulator'
+    elif 'cytosolic protein' in value:
+        return 'cytosolic protein'
     else:
-        return 'other'
-    
+        return 'Other'
+
 def map_target_taxonomy(value):
-    """Map target taxonomy to a simplified category."""
-    if pd.isna(value):
-        return np.nan
-    value = value.lower().strip()
-    
-    categories = {
-        'Enzyme': ['enzyme'],
-        'Receptor': ['receptor'],
-        'Transcription Factor': ['transcription factor'],
-        'Nuclear Hormone Receptor': ['nuclear hormone receptor'],
-        'Calcium Channel': ['calcium channel'],
-        'Surface Antigen': ['surface antigen'],
-        'Microorganism': ['fungi', 'viruses', 'bacteria'],
-        'Eukaryotes': ['eukaryotes'],
-        'Subcellular Component': ['subcellular'],
-        'Small Molecule': ['small molecule'],
-        'Lipid': ['lipid'],
-        'Cell Line': ['cellline'],
-        'Nucleic Acid': ['nucleic acid']
-    }
-    
-    for category, keywords in categories.items():
-        if any(keyword in value for keyword in keywords):
-            return category
-    
-    return 'Other'
+    if 'Eukaryotes' in value:
+        if 'Oxidoreductase' in value:
+            return 'Oxidoreductase'
+        elif 'Transferase' in value:
+            return 'Transferase' 
+        elif 'Hydrolase' in value:
+            return 'Hydrolase'
+        else:
+            return 'Eukaryotes'
+    elif 'Bacteria' in value: 
+        return 'Bacteria'
+    elif 'Fungi' in value:
+        return 'Fungi'
+    elif 'Viruses' in value: 
+        return 'Viruses'
+    elif 'unclassified' in value:
+        return 'Unclassified'
+    else:
+        return 'Other'
 
 def map_target_organism(value):
     """Map target organism to a simplified category."""
@@ -206,29 +239,83 @@ def plot_faerun(x, y, s, t, df):
     organism_labels, organism_data = safe_create_categories(df['map_target_organism'])
 
     labels = []
+    hac_data = []
+    frac_aromatic_data = []
+    num_rings_data = []
+    clogp_data = []
+    frac_csp3_data = []
+
     for i, row in df.iterrows():
         labels.append(
                 row['canonical_smiles']
                 + '__'
-                + f'<a target="_blank" href="https://www.ebi.ac.uk/chembl/target_report_card/{row["Target_ID"]}">Go To Target Card</a><br>'
+                + f'<a target="_blank" href="https://www.ebi.ac.uk/chembl/target_report_card/{row["Target_ID"]}">{row["Target_ID"]}</a><br>'
             )
         
+        # Calculate molecular properties
+        properties = calculate_molecular_properties(row['canonical_smiles'])
+        if properties:
+            hac, frac_aromatic, num_rings, clogp, frac_csp3 = properties
+            hac_data.append(hac)
+            frac_aromatic_data.append(frac_aromatic)
+            num_rings_data.append(num_rings)
+            clogp_data.append(clogp)
+            frac_csp3_data.append(frac_csp3)
+        else:
+            # Handle invalid SMILES
+            hac_data.append(None)
+            frac_aromatic_data.append(None)
+            num_rings_data.append(None)
+            clogp_data.append(None)
+            frac_csp3_data.append(None)
+   
+    # Calculate threshold for hac_data using IQR
+    hac_threshold = calculate_threshold(hac_data)
+    frac_threshold = calculate_threshold(frac_aromatic_data)
+    rings_threshold = calculate_threshold(num_rings_data)
+    clogp_threshold = calculate_threshold(clogp_data)
+    csp3_threshold = calculate_threshold(frac_csp3_data)
+
+    # Function to apply thresholds and return filtered data
+    def apply_thresholds(hac_data, frac_aromatic_data, num_rings_data, clogp_data, frac_csp3_data):
+        filtered_hac = []
+        filtered_frac_aromatic = []
+        filtered_num_rings = []
+        filtered_clogp = []
+        filtered_frac_csp3 = []
+
+        # Iterate through all data points and apply thresholds
+        for hac, frac, rings, clogp, csp3 in zip(hac_data, frac_aromatic_data, num_rings_data, clogp_data, frac_csp3_data):
+            if hac <= hac_threshold and frac <= frac_threshold and rings <= rings_threshold and clogp <= clogp_threshold and csp3 <= csp3_threshold:
+                filtered_hac.append(hac)
+                filtered_frac_aromatic.append(frac)
+                filtered_num_rings.append(rings)
+                filtered_clogp.append(clogp)
+                filtered_frac_csp3.append(csp3)
+
+        return filtered_hac, filtered_frac_aromatic, filtered_num_rings, filtered_clogp, filtered_frac_csp3
+
+    filtered_hac,filtered_frac_aromatic, filtered_num_rings, filtered_clogp, filtered_frac_csp3 = apply_thresholds(hac_data, frac_aromatic_data, num_rings_data, clogp_data, frac_csp3_data)
+
     # Add scatter plot
     f.add_scatter(
         "mapc_nice_labels",
         {
             "x": x,
             "y": y,
-            "c": [protein_class_data, taxonomy_data, organism_data],
+            "c": [protein_class_data, taxonomy_data, organism_data, 
+                  filtered_hac, filtered_frac_aromatic, filtered_num_rings, filtered_clogp, filtered_frac_csp3],
             "labels": labels,
         },
-        shader="sphere",
-        point_scale=4,
-        max_point_size=10,
+        shader="smoothCircle",
+        point_scale=4.0,
+        max_point_size=20,
+        interactive=True,
         legend_labels=[protein_class_labels, taxonomy_labels, organism_labels],
-        categorical=[True, True, True, True],
-        colormap="tab10",
-        series_title=['Protein Class', 'Target Taxonomy', 'Target Organism'],
+        categorical=[True, True, True, False, False, False, False, False],
+        colormap=['tab10', 'tab10', 'tab10', 'viridis', 'viridis', 'viridis', 'viridis', 'viridis'],
+        series_title=['Protein Class', 'Target Taxonomy', 'Target Organism',
+                      'HAC', 'Fraction Aromatic Atoms', 'Number of Rings', 'clogP', 'Fraction Csp3'],
         has_legend=True,
     )
 
@@ -310,3 +397,4 @@ if __name__ == "__main__":
     end_time = timer()
     logger.info('TMAP successfully generated.')
     print(f"Total execution time: {(end_time - start_time)/60:.2f} minutes")
+    
